@@ -43,7 +43,7 @@ pub async fn run() {
           Event::WindowEvent {
               ref event,
               window_id,
-          } if window_id == state.window().id() => {
+          } if window_id == state.window().id() => if !state.input(event) {
               match event {
                   WindowEvent::CloseRequested
                   | WindowEvent::KeyboardInput {
@@ -66,6 +66,23 @@ pub async fn run() {
                   _ => {} // catch-all for other events
               }
           }
+          Event::RedrawRequested(window_id) if window_id == state.window().id() => {
+            state.update();
+            match state.render() {
+                Ok(_) => {}
+                // Reconfigure the surface if lost
+                Err(wgpu::SurfaceError::Lost) => state.resize(state.size),
+                // The system is out of memory, we should probably quit
+                Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
+                // All other errors (Outdated, Timeout) should be resolved by the next frame
+                Err(e) => eprintln!("{:?}", e),
+            }
+          }
+          Event::MainEventsCleared => {
+              // RedrawRequested will only trigger once unless we manually
+              // request it.
+              state.window().request_redraw();
+          }
           _ => {} // catch-all for non-window events
       }
   });
@@ -82,6 +99,7 @@ struct State {
     // it gets dropped after it as the surface contains
     // unsafe references to the window's resources.
     window: Window,
+    clear_color: wgpu::Color,
 }
 
 impl State {
@@ -152,31 +170,75 @@ impl State {
         queue,
         config,
         size,
+        clear_color: wgpu::Color { r: 0.1, g: 0.2, b: 0.3, a: 1.0 },
       }
   }
 
-    pub fn window(&self) -> &Window {
-        &self.window
-    }
-
-    pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
-      if new_size.width > 0 && new_size.height > 0 {
-          self.size = new_size;
-          self.config.width = new_size.width;
-          self.config.height = new_size.height;
-          self.surface.configure(&self.device, &self.config);
-      }
+  pub fn window(&self) -> &Window {
+      &self.window
   }
 
-    fn input(&mut self, event: &WindowEvent) -> bool {
-        todo!()
+  pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
+    if new_size.width > 0 && new_size.height > 0 {
+        self.size = new_size;
+        self.config.width = new_size.width;
+        self.config.height = new_size.height;
+        self.surface.configure(&self.device, &self.config);
+    }
+  }
+
+  fn input(&mut self, event: &WindowEvent) -> bool {
+    match event {
+        WindowEvent::CursorMoved { position, .. } => {
+            // Normalize the cursor position to 0.0 - 1.0
+            let x = position.x as f64 / self.size.width as f64;
+            let y = position.y as f64 / self.size.height as f64;
+
+            // Update clear color based on the position
+            self.clear_color = wgpu::Color {
+                r: x,
+                g: y,
+                b: (x+y)/2.0, // Example: fixed blue component
+                a: 1.0,
+            };
+
+            true
+        }
+        _ => false,
+    }
+  }
+
+  fn update(&mut self) {
+      // remove `todo!()`
+  }
+
+  fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+    let output = self.surface.get_current_texture()?;
+    let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("Render Encoder"),
+    });
+    {
+      let _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+          label: Some("Render Pass"),
+          color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+              view: &view,
+              resolve_target: None,
+              ops: wgpu::Operations {
+                load: wgpu::LoadOp::Clear(self.clear_color),
+                store: wgpu::StoreOp::Store,
+              },
+          })],
+          depth_stencil_attachment: None,
+          occlusion_query_set: None,
+          timestamp_writes: None,
+      });
     }
 
-    fn update(&mut self) {
-        todo!()
-    }
+    // submit will accept anything that implements IntoIter
+    self.queue.submit(std::iter::once(encoder.finish()));
+    output.present();
 
-    fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
-        todo!()
-    }
+    Ok(())
+  }
 }
