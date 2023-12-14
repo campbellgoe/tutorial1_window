@@ -101,6 +101,8 @@ struct State {
     window: Window,
     clear_color: wgpu::Color,
     render_pipeline: wgpu::RenderPipeline,
+    color_pipeline: wgpu::RenderPipeline,
+    pipeline_toggle: bool,
 }
 
 impl State {
@@ -207,6 +209,40 @@ impl State {
       },
       multiview: None, // 5.
     });
+    let color_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+      label: Some("Color Pipeline"),
+      layout: Some(&render_pipeline_layout), // You can reuse the layout
+      vertex: wgpu::VertexState {
+          module: &shader, // Reuse the shader module
+          entry_point: "vs_main_color", // Entry point for the vertex shader
+          buffers: &[], // Vertex buffers description
+      },
+      fragment: Some(wgpu::FragmentState { // Fragment shader
+          module: &shader, // Reuse the shader module
+          entry_point: "fs_main_color", // Entry point for the fragment shader
+          targets: &[Some(wgpu::ColorTargetState {
+              format: config.format,
+              blend: Some(wgpu::BlendState::REPLACE),
+              write_mask: wgpu::ColorWrites::ALL,
+          })],
+      }),
+      primitive: wgpu::PrimitiveState {
+          topology: wgpu::PrimitiveTopology::TriangleList,
+          strip_index_format: None,
+          front_face: wgpu::FrontFace::Ccw,
+          cull_mode: Some(wgpu::Face::Back),
+          polygon_mode: wgpu::PolygonMode::Fill,
+          unclipped_depth: false,
+          conservative: false,
+      },
+      depth_stencil: None,
+      multisample: wgpu::MultisampleState {
+          count: 1,
+          mask: !0,
+          alpha_to_coverage_enabled: false,
+      },
+      multiview: None,
+  });
     Self {
       window,
       surface,
@@ -216,6 +252,8 @@ impl State {
       size,
       clear_color: wgpu::Color { r: 0.1, g: 0.2, b: 0.3, a: 1.0 },
       render_pipeline,
+      color_pipeline,
+      pipeline_toggle: false,
     }
   }
 
@@ -249,6 +287,20 @@ impl State {
 
             true
         }
+        WindowEvent::KeyboardInput {
+          input:
+              KeyboardInput {
+                  state: ElementState::Pressed,
+                  virtual_keycode: Some(VirtualKeyCode::Space),
+                  ..
+              },
+          ..
+        } => {
+            // Add logic to toggle between pipelines
+            self.pipeline_toggle = !self.pipeline_toggle;
+            println!("Pipeline toggled: {}", self.pipeline_toggle);
+            true
+        }
         _ => false,
     }
   }
@@ -278,8 +330,16 @@ impl State {
           occlusion_query_set: None,
           timestamp_writes: None,
       });
-      render_pass.set_pipeline(&self.render_pipeline); // 2.
-      render_pass.draw(0..3, 0..1); // 3.
+
+      let pipeline = if self.pipeline_toggle {
+        &self.color_pipeline
+      } else {
+        &self.render_pipeline
+      };
+
+      // Use the selected pipeline
+      render_pass.set_pipeline(pipeline);
+      render_pass.draw(0..3, 0..1);
     }
 
     // submit will accept anything that implements IntoIter
