@@ -1,5 +1,6 @@
 mod texture;
 
+
 use winit::{
   event::*,
   event_loop::{ControlFlow, EventLoop},
@@ -120,10 +121,19 @@ struct State {
     square_num_indices: u32,
     spacebar_toggle: bool,
     diffuse_bind_group: wgpu::BindGroup,
+    noise_bind_group: wgpu::BindGroup,
     diffuse_texture: texture::Texture,
+    noise_texture: texture::Texture,
 }
 
 impl State {
+  fn get_texture_bind_group(&self) -> &wgpu::BindGroup {
+    if self.spacebar_toggle {
+        &self.diffuse_bind_group
+    } else {
+       &self.noise_bind_group
+    }
+}
 // Creating some of the wgpu types requires async code
   async fn new(window: Window) -> Self {
     let size = window.inner_size();
@@ -187,6 +197,10 @@ impl State {
     let diffuse_bytes = include_bytes!("happy-tree.png");
     let diffuse_texture = texture::Texture::from_bytes(&device, &queue, diffuse_bytes, "happy-tree.png").unwrap(); 
 
+    let noise_bytes = include_bytes!("layered-simplex-noise.png");
+    let noise_texture = texture::Texture::from_bytes(&device, &queue, noise_bytes, "layered-simplex-noise.png").unwrap(); 
+
+
    
     let texture_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
           entries: &[
@@ -212,22 +226,39 @@ impl State {
           label: Some("texture_bind_group_layout"),
       });
       let diffuse_bind_group = device.create_bind_group(
-            &wgpu::BindGroupDescriptor {
-                layout: &texture_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
-                    }
-                ],
-                label: Some("diffuse_bind_group"),
+        &wgpu::BindGroupDescriptor {
+            layout: &texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
+                }
+            ],
+            label: Some("diffuse_bind_group"),
+        }
+  );
+       
+  let noise_bind_group = device.create_bind_group(
+    &wgpu::BindGroupDescriptor {
+        layout: &texture_bind_group_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&noise_texture.view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(&noise_texture.sampler),
             }
-      );
-           
+        ],
+        label: Some("noise_bind_group"),
+    }
+);
+  
       let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
       let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
           label: Some("Render Pipeline Layout"),
@@ -380,7 +411,9 @@ impl State {
     square_num_indices,
     spacebar_toggle: false,
     diffuse_bind_group,
+    noise_bind_group,
     diffuse_texture,
+    noise_texture,
   }
 }
 
@@ -471,9 +504,11 @@ impl State {
         (&self.square_vertex_buffer, &self.square_index_buffer, self.square_num_indices)
       };
 
+      let current_bind_group = self.get_texture_bind_group();
+
       // Use the selected pipeline
       render_pass.set_pipeline(pipeline);
-      render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
+      render_pass.set_bind_group(0, current_bind_group, &[]);
       render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
       render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16); // 1.
       render_pass.draw_indexed(0..num_indices, 0, 0..1); // 2.
