@@ -105,10 +105,17 @@ struct State {
     render_pipeline: wgpu::RenderPipeline,
     color_pipeline: wgpu::RenderPipeline,
     pipeline_toggle: bool,
-    vertex_buffer: wgpu::Buffer,
-    num_vertices: u32,
-    index_buffer: wgpu::Buffer, 
-    num_indices: u32,
+    // vertex_buffer: wgpu::Buffer,
+    // num_vertices: u32,
+    // index_buffer: wgpu::Buffer, 
+    // num_indices: u32,
+    hexagon_vertex_buffer: wgpu::Buffer,
+    hexagon_index_buffer: wgpu::Buffer,
+    hexagon_num_indices: u32,
+    square_vertex_buffer: wgpu::Buffer,
+    square_index_buffer: wgpu::Buffer,
+    square_num_indices: u32,
+    spacebar_toggle: bool,
 }
 
 impl State {
@@ -253,22 +260,54 @@ impl State {
       },
       multiview: None,
     });
-    let vertex_buffer = device.create_buffer_init(
-      &wgpu::util::BufferInitDescriptor {
-          label: Some("Vertex Buffer"),
-          contents: bytemuck::cast_slice(VERTICES),
-          usage: wgpu::BufferUsages::VERTEX,
-      }
-    );
-    let index_buffer = device.create_buffer_init(
-      &wgpu::util::BufferInitDescriptor {
-          label: Some("Index Buffer"),
-          contents: bytemuck::cast_slice(INDICES),
-          usage: wgpu::BufferUsages::INDEX,
-      }
-    );
-    let num_indices = INDICES.len() as u32;
-    let num_vertices = VERTICES.len() as u32;
+    // let vertex_buffer = device.create_buffer_init(
+    //   &wgpu::util::BufferInitDescriptor {
+    //       label: Some("Vertex Buffer"),
+    //       contents: bytemuck::cast_slice(VERTICES),
+    //       usage: wgpu::BufferUsages::VERTEX,
+    //   }
+    // );
+    // let index_buffer = device.create_buffer_init(
+    //   &wgpu::util::BufferInitDescriptor {
+    //       label: Some("Index Buffer"),
+    //       contents: bytemuck::cast_slice(INDICES),
+    //       usage: wgpu::BufferUsages::INDEX,
+    //   }
+    // );
+    // let num_indices = INDICES.len() as u32;
+    // let num_vertices = VERTICES.len() as u32;
+
+    let hexagon_vertex_buffer = device.create_buffer_init(
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("Vertex Buffer"),
+            contents: bytemuck::cast_slice(HEXAGON_VERTICES),
+            usage: wgpu::BufferUsages::VERTEX,
+        }
+      );
+    let hexagon_index_buffer = device.create_buffer_init(
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("Index Buffer"),
+            contents: bytemuck::cast_slice(HEXAGON_INDICES),
+            usage: wgpu::BufferUsages::INDEX,
+        }
+      );
+    let hexagon_num_indices = HEXAGON_INDICES.len() as u32;
+
+    let square_vertex_buffer = device.create_buffer_init(
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("Vertex Buffer"),
+            contents: bytemuck::cast_slice(SQUARE_VERTICES),
+            usage: wgpu::BufferUsages::VERTEX,
+        }
+      );
+    let square_index_buffer = device.create_buffer_init(
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("Index Buffer"),
+            contents: bytemuck::cast_slice(SQUARE_INDICES),
+            usage: wgpu::BufferUsages::INDEX,
+        }
+      );
+    let square_num_indices = SQUARE_INDICES.len() as u32;
     Self {
       window,
       surface,
@@ -280,10 +319,17 @@ impl State {
       render_pipeline,
       color_pipeline,
       pipeline_toggle: false,
-      vertex_buffer,
-      num_vertices,
-      index_buffer,
-      num_indices,
+    //   vertex_buffer,
+    //   num_vertices,
+    //   index_buffer,
+    //   num_indices,
+        hexagon_vertex_buffer,
+        hexagon_index_buffer,
+        hexagon_num_indices,
+        square_vertex_buffer,
+        square_index_buffer,
+        square_num_indices,
+        spacebar_toggle: false,
     }
   }
 
@@ -328,7 +374,8 @@ impl State {
         } => {
             // Add logic to toggle between pipelines
             self.pipeline_toggle = !self.pipeline_toggle;
-            println!("Pipeline toggled: {}", self.pipeline_toggle);
+            self.spacebar_toggle = !self.spacebar_toggle;
+            println!("Spacebar pressed, toggle value: {}", self.spacebar_toggle);
             true
         }
         _ => false,
@@ -367,11 +414,17 @@ impl State {
         &self.render_pipeline
       };
 
+      let (vertex_buffer, index_buffer, num_indices) = if self.spacebar_toggle {
+        (&self.hexagon_vertex_buffer, &self.hexagon_index_buffer, self.hexagon_num_indices)
+      } else {
+        (&self.square_vertex_buffer, &self.square_index_buffer, self.square_num_indices)
+      };
+
       // Use the selected pipeline
       render_pass.set_pipeline(pipeline);
-      render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-      render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16); // 1.
-      render_pass.draw_indexed(0..self.num_indices, 0, 0..1); // 2.
+      render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+      render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16); // 1.
+      render_pass.draw_indexed(0..num_indices, 0, 0..1); // 2.
       //render_pass.draw(0..self.num_vertices, 0..1);
     }
 
@@ -390,7 +443,7 @@ struct Vertex {
     color: [f32; 3],
 }
 
-const VERTICES: &[Vertex] = &[
+const _VERTICES: &[Vertex] = &[
     Vertex { position: [-0.0868241, 0.49240386, 0.0], color: [0.5, 0.0, 0.5] }, // A
     Vertex { position: [-0.49513406, 0.06958647, 0.0], color: [0.5, 0.0, 0.5] }, // B
     Vertex { position: [-0.21918549, -0.44939706, 0.0], color: [0.5, 0.0, 0.5] }, // C
@@ -398,10 +451,41 @@ const VERTICES: &[Vertex] = &[
     Vertex { position: [0.44147372, 0.2347359, 0.0], color: [0.5, 0.0, 0.5] }, // E
 ];
 
-const INDICES: &[u16] = &[
+const _INDICES: &[u16] = &[
     0, 1, 4,
     1, 2, 4,
     2, 3, 4,
+];
+
+const HEXAGON_VERTICES: &[Vertex] = &[
+    Vertex { position: [ 0.0,  0.0, 0.0], color: [0.5, 0.0, 0.5] }, // Center
+    Vertex { position: [ 0.0,  1.0, 0.0], color: [0.5, 0.0, 0.5] }, // Top
+    Vertex { position: [-0.86,  0.5, 0.0], color: [0.5, 0.0, 0.5] }, // Top Left
+    Vertex { position: [-0.86, -0.5, 0.0], color: [0.5, 0.0, 0.5] }, // Bottom Left
+    Vertex { position: [ 0.0, -1.0, 0.0], color: [0.5, 0.0, 0.5] }, // Bottom
+    Vertex { position: [ 0.86, -0.5, 0.0], color: [0.5, 0.0, 0.5] }, // Bottom Right
+    Vertex { position: [ 0.86,  0.5, 0.0], color: [0.5, 0.0, 0.5] }, // Top Right
+];
+
+const HEXAGON_INDICES: &[u16] = &[
+    0, 1, 2,
+    0, 2, 3,
+    0, 3, 4,
+    0, 4, 5,
+    0, 5, 6,
+    0, 6, 1,
+];
+
+const SQUARE_VERTICES: &[Vertex] = &[
+    Vertex { position: [-1.0,  1.0, 0.0], color: [1.0, 0.0, 0.0] }, // Top-left
+    Vertex { position: [ 1.0,  1.0, 0.0], color: [0.0, 1.0, 0.0] }, // Top-right
+    Vertex { position: [-1.0, -1.0, 0.0], color: [0.0, 0.0, 1.0] }, // Bottom-left
+    Vertex { position: [ 1.0, -1.0, 0.0], color: [1.0, 1.0, 0.0] }, // Bottom-right
+];
+
+const SQUARE_INDICES: &[u16] = &[
+    0, 2, 3, // First triangle: top-left, bottom-left, bottom-right
+    0, 3, 1, // Second triangle: top-left, bottom-right, top-right
 ];
 
 impl Vertex {
