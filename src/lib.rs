@@ -8,7 +8,7 @@ use winit::{
 };
 
 use wgpu::util::DeviceExt;
-
+use cgmath::prelude::*;
 
 #[cfg(target_arch="wasm32")]
 use wasm_bindgen::prelude::*;
@@ -182,6 +182,64 @@ impl CameraController {
   }
 }
 
+struct Instance {
+  position: cgmath::Vector3<f32>,
+  rotation: cgmath::Quaternion<f32>,
+}
+
+impl Instance {
+  fn to_raw(&self) -> InstanceRaw {
+      InstanceRaw {
+          model: (cgmath::Matrix4::from_translation(self.position) * cgmath::Matrix4::from(self.rotation)).into(),
+      }
+  }
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct InstanceRaw {
+    model: [[f32; 4]; 4],
+}
+
+impl InstanceRaw {
+  fn desc() -> wgpu::VertexBufferLayout<'static> {
+      use std::mem;
+      wgpu::VertexBufferLayout {
+          array_stride: mem::size_of::<InstanceRaw>() as wgpu::BufferAddress,
+          // We need to switch from using a step mode of Vertex to Instance
+          // This means that our shaders will only change to use the next
+          // instance when the shader starts processing a new instance
+          step_mode: wgpu::VertexStepMode::Instance,
+          attributes: &[
+              // A mat4 takes up 4 vertex slots as it is technically 4 vec4s. We need to define a slot
+              // for each vec4. We'll have to reassemble the mat4 in the shader.
+              wgpu::VertexAttribute {
+                  offset: 0,
+                  // While our vertex shader only uses locations 0, and 1 now, in later tutorials, we'll
+                  // be using 2, 3, and 4, for Vertex. We'll start at slot 5, not conflict with them later
+                  shader_location: 5,
+                  format: wgpu::VertexFormat::Float32x4,
+              },
+              wgpu::VertexAttribute {
+                  offset: mem::size_of::<[f32; 4]>() as wgpu::BufferAddress,
+                  shader_location: 6,
+                  format: wgpu::VertexFormat::Float32x4,
+              },
+              wgpu::VertexAttribute {
+                  offset: mem::size_of::<[f32; 8]>() as wgpu::BufferAddress,
+                  shader_location: 7,
+                  format: wgpu::VertexFormat::Float32x4,
+              },
+              wgpu::VertexAttribute {
+                  offset: mem::size_of::<[f32; 12]>() as wgpu::BufferAddress,
+                  shader_location: 8,
+                  format: wgpu::VertexFormat::Float32x4,
+              },
+          ],
+      }
+  }
+}
+
 // We need this for Rust to store our data correctly for the shaders
 #[repr(C)]
 // This is so we can store this in a buffer
@@ -246,7 +304,7 @@ struct State {
     window: Window,
     clear_color: wgpu::Color,
     render_pipeline: wgpu::RenderPipeline,
-    color_pipeline: wgpu::RenderPipeline,
+    // color_pipeline: wgpu::RenderPipeline,
     pipeline_toggle: bool,
     // vertex_buffer: wgpu::Buffer,
     // num_vertices: u32,
@@ -268,6 +326,8 @@ struct State {
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     camera_controller: CameraController,
+    instances: Vec<Instance>,
+    instance_buffer: wgpu::Buffer,
 }
 
 impl State {
@@ -344,7 +404,35 @@ impl State {
     let noise_bytes = include_bytes!("layered-simplex-noise.png");
     let noise_texture = texture::Texture::from_bytes(&device, &queue, noise_bytes, "layered-simplex-noise.png").unwrap(); 
 
+    const NUM_INSTANCES_PER_ROW: u32 = 10;
+    const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(NUM_INSTANCES_PER_ROW as f32 * 0.5, 0.0, NUM_INSTANCES_PER_ROW as f32 * 0.5);
 
+    let instances = (0..NUM_INSTANCES_PER_ROW).flat_map(|z| {
+      (0..NUM_INSTANCES_PER_ROW).map(move |x| {
+          let position = cgmath::Vector3 { x: x as f32, y: 0.0, z: z as f32 } - INSTANCE_DISPLACEMENT;
+
+          let rotation = if position.is_zero() {
+              // this is needed so an object at (0, 0, 0) won't get scaled to zero
+              // as Quaternions can affect scale if they're not created correctly
+              cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0))
+          } else {
+              cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
+          };
+
+          Instance {
+              position, rotation,
+          }
+      })
+    }).collect::<Vec<_>>();
+
+    let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
+    let instance_buffer = device.create_buffer_init(
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("Instance Buffer"),
+            contents: bytemuck::cast_slice(&instance_data),
+            usage: wgpu::BufferUsages::VERTEX,
+        }
+    );
    
     let texture_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
           entries: &[
@@ -432,9 +520,7 @@ let camera_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupL
       vertex: wgpu::VertexState {
           module: &shader,
           entry_point: "vs_main", // 1.
-          buffers: &[
-              Vertex::desc(),
-          ],
+          buffers: &[Vertex::desc(), InstanceRaw::desc()],
       },
       fragment: Some(wgpu::FragmentState { // 3.
           module: &shader,
@@ -465,42 +551,42 @@ let camera_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupL
       },
       multiview: None, // 5.
   });
-  let color_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-      label: Some("Color Pipeline"),
-      layout: Some(&render_pipeline_layout), // You can reuse the layout
-      vertex: wgpu::VertexState {
-          module: &shader, // Reuse the shader module
-          entry_point: "vs_main", // Entry point for the vertex shader
-          buffers: &[
-          Vertex::desc(),
-          ],
-      },
-      fragment: Some(wgpu::FragmentState { // Fragment shader
-          module: &shader, // Reuse the shader module
-          entry_point: "fs_main", // Entry point for the fragment shader
-          targets: &[Some(wgpu::ColorTargetState {
-              format: config.format,
-              blend: Some(wgpu::BlendState::REPLACE),
-              write_mask: wgpu::ColorWrites::ALL,
-          })],
-      }),
-      primitive: wgpu::PrimitiveState {
-          topology: wgpu::PrimitiveTopology::TriangleList,
-          strip_index_format: None,
-          front_face: wgpu::FrontFace::Ccw,
-          cull_mode: Some(wgpu::Face::Back),
-          polygon_mode: wgpu::PolygonMode::Fill,
-          unclipped_depth: false,
-          conservative: false,
-      },
-      depth_stencil: None,
-      multisample: wgpu::MultisampleState {
-          count: 1,
-          mask: !0,
-          alpha_to_coverage_enabled: false,
-      },
-      multiview: None,
-  });
+  // let color_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+  //     label: Some("Color Pipeline"),
+  //     layout: Some(&render_pipeline_layout), // You can reuse the layout
+  //     vertex: wgpu::VertexState {
+  //         module: &shader, // Reuse the shader module
+  //         entry_point: "vs_main", // Entry point for the vertex shader
+  //         buffers: &[
+  //         Vertex::desc(),
+  //         ],
+  //     },
+  //     fragment: Some(wgpu::FragmentState { // Fragment shader
+  //         module: &shader, // Reuse the shader module
+  //         entry_point: "fs_main", // Entry point for the fragment shader
+  //         targets: &[Some(wgpu::ColorTargetState {
+  //             format: config.format,
+  //             blend: Some(wgpu::BlendState::REPLACE),
+  //             write_mask: wgpu::ColorWrites::ALL,
+  //         })],
+  //     }),
+  //     primitive: wgpu::PrimitiveState {
+  //         topology: wgpu::PrimitiveTopology::TriangleList,
+  //         strip_index_format: None,
+  //         front_face: wgpu::FrontFace::Ccw,
+  //         cull_mode: Some(wgpu::Face::Back),
+  //         polygon_mode: wgpu::PolygonMode::Fill,
+  //         unclipped_depth: false,
+  //         conservative: false,
+  //     },
+  //     depth_stencil: None,
+  //     multisample: wgpu::MultisampleState {
+  //         count: 1,
+  //         mask: !0,
+  //         alpha_to_coverage_enabled: false,
+  //     },
+  //     multiview: None,
+  // });
   // let vertex_buffer = device.create_buffer_init(
   //   &wgpu::util::BufferInitDescriptor {
   //       label: Some("Vertex Buffer"),
@@ -595,7 +681,7 @@ let camera_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupL
     size,
     clear_color: wgpu::Color { r: 0.1, g: 0.2, b: 0.3, a: 1.0 },
     render_pipeline,
-    color_pipeline,
+    // color_pipeline,
     pipeline_toggle: false,
 //   vertex_buffer,
 //   num_vertices,
@@ -617,6 +703,8 @@ let camera_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupL
     camera_buffer,
     camera_bind_group,
     camera_controller,
+    instances,
+    instance_buffer,
   }
 }
 
@@ -701,11 +789,11 @@ let camera_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupL
           timestamp_writes: None,
       });
 
-      let pipeline = if self.pipeline_toggle {
+      let pipeline = &self.render_pipeline;/*if self.spacebar_toggle {
         &self.color_pipeline
       } else {
         &self.render_pipeline
-      };
+      };*/
 
       let (vertex_buffer, index_buffer, num_indices) = if self.spacebar_toggle {
         (&self.hexagon_vertex_buffer, &self.hexagon_index_buffer, self.hexagon_num_indices)
@@ -719,9 +807,10 @@ let camera_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupL
       render_pass.set_pipeline(pipeline);
       render_pass.set_bind_group(0, current_bind_group, &[]);
       render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
-      render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-      render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16); // 1.
-      render_pass.draw_indexed(0..num_indices, 0, 0..1); // 2.
+      render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));; // 1.
+      render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+      render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+      render_pass.draw_indexed(0..num_indices, 0, 0..self.instances.len() as _);
       //render_pass.draw(0..self.num_vertices, 0..1);
     }
 
