@@ -427,11 +427,11 @@ impl State {
 
     let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
     let instance_buffer = device.create_buffer_init(
-        &wgpu::util::BufferInitDescriptor {
-            label: Some("Instance Buffer"),
-            contents: bytemuck::cast_slice(&instance_data),
-            usage: wgpu::BufferUsages::VERTEX,
-        }
+      &wgpu::util::BufferInitDescriptor {
+          label: Some("Instance Buffer"),
+          contents: bytemuck::cast_slice(&instance_data),
+          usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, // Include COPY_DST here
+      }
     );
    
     let texture_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -608,14 +608,14 @@ let camera_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupL
     &wgpu::util::BufferInitDescriptor {
         label: Some("Vertex Buffer"),
         contents: bytemuck::cast_slice(HEXAGON_VERTICES),
-        usage: wgpu::BufferUsages::VERTEX,
+        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
     }
     );
   let hexagon_index_buffer = device.create_buffer_init(
     &wgpu::util::BufferInitDescriptor {
         label: Some("Index Buffer"),
         contents: bytemuck::cast_slice(HEXAGON_INDICES),
-        usage: wgpu::BufferUsages::INDEX,
+        usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
     }
     );
   let hexagon_num_indices = HEXAGON_INDICES.len() as u32;
@@ -631,7 +631,7 @@ let camera_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupL
     &wgpu::util::BufferInitDescriptor {
         label: Some("Index Buffer"),
         contents: bytemuck::cast_slice(SQUARE_INDICES),
-        usage: wgpu::BufferUsages::INDEX,
+        usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
     }
     );
   let square_num_indices = SQUARE_INDICES.len() as u32;
@@ -762,9 +762,18 @@ let camera_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupL
   }
 
   fn update(&mut self) {
+    let delta_rotation = cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(1.0));
+
+    for instance in self.instances.iter_mut() {
+        // Rotate the instance around the Z-axis
+        instance.rotation = instance.rotation * delta_rotation;
+    }
+
     self.camera_controller.update_camera(&mut self.camera);
     self.camera_uniform.update_view_proj(&self.camera);
     self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.camera_uniform]));
+    let instance_data = self.instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
+    self.queue.write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&instance_data));
   }
 
   fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
