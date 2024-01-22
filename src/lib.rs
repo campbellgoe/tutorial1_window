@@ -150,25 +150,35 @@ impl CameraController {
   }
 
   fn update_camera(&self, camera: &mut Camera) {
-      use cgmath::InnerSpace;
-      let forward = camera.target - camera.eye;
-      let forward_norm = forward.normalize();
-      let forward_mag = forward.magnitude();
+    use cgmath::InnerSpace;
 
-      // Prevents glitching when the camera gets too close to the
-      // center of the scene.
-      if self.is_forward_pressed && forward_mag > self.speed {
-          camera.eye += forward_norm * self.speed;
-      }
-      if self.is_backward_pressed {
-          camera.eye -= forward_norm * self.speed;
-      }
-
-      let right = forward_norm.cross(camera.up);
-
-      // Redo radius calc in case the forward/backward is pressed.
-      let forward = camera.target - camera.eye;
-      let forward_mag = forward.magnitude();
+    // Define a minimum distance from the target
+    let min_distance = 1.0; // Example value, adjust as needed
+    
+    let forward = camera.target - camera.eye;
+    let forward_norm = forward.normalize();
+    let forward_mag = forward.magnitude();
+    
+    // Prevents glitching when the camera gets too close to the
+    // center of the scene.
+    if self.is_forward_pressed {
+        // Check if moving forward breaches the minimum distance
+        if forward_mag - self.speed > min_distance {
+            camera.eye += forward_norm * self.speed;
+        } else {
+            // Clamp to the minimum distance if necessary
+            camera.eye = camera.target - forward_norm * min_distance;
+        }
+    }
+    if self.is_backward_pressed {
+        camera.eye -= forward_norm * self.speed;
+    }
+    
+    let right = forward_norm.cross(camera.up);
+    
+    // Redo radius calc in case the forward/backward is pressed.
+    let forward = camera.target - camera.eye;
+    let forward_mag = forward.magnitude();
 
       if self.is_right_pressed {
           // Rescale the distance between the target and the eye so 
