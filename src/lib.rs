@@ -833,7 +833,7 @@ let camera_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupL
       render_pass.set_pipeline(pipeline);
       render_pass.set_bind_group(0, current_bind_group, &[]);
       render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
-      render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));; // 1.
+      render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
       render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
       render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16);
       render_pass.draw_indexed(0..num_indices, 0, 0..self.instances.len() as _);
